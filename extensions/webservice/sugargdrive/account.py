@@ -14,7 +14,6 @@
 
 import os
 import sys
-import logging
 from sugar3 import env
 from gettext import gettext as _
 
@@ -98,6 +97,7 @@ class _SharedJournalEntry(SharedJournalEntry):
         transfer_widget.connect('transfer-state-changed',
                                 self.__display_alert_cb)
 
+
 class _ShareMenu(MenuItem):
     __gsignals__ = {
         'transfer-state-changed': (GObject.SignalFlags.RUN_FIRST, None,
@@ -106,7 +106,6 @@ class _ShareMenu(MenuItem):
 
     def __init__(self, account, get_uid_list, is_active):
         MenuItem.__init__(self, ACCOUNT_NAME)
-        from sugar3.datastore import datastore
 
         self._account = account
         self.set_image(Icon(icon_name=ACCOUNT_ICON,
@@ -124,14 +123,6 @@ class _ShareMenu(MenuItem):
         path = str(jobject.file_path)
 
         return path
-
-    def _get_mimetype(self):
-        metadata = self._get_metadata()
-        mime_type = "text/plain"
-        if 'mime_type' in metadata:
-            title = str(metadata['mime_type'])
-
-        return mime_type
 
     def _get_description(self):
         metadata = self._get_metadata()
@@ -152,7 +143,6 @@ class _ShareMenu(MenuItem):
     def __share_menu_cb(self, menu_item):
         path = self._get_data()
         title = self._get_title()
-        mime_type = self._get_mimetype()
         description = self._get_description()
 
         self.emit('transfer-state-changed', _('Google drive'),
@@ -161,9 +151,7 @@ class _ShareMenu(MenuItem):
         upload = self._account.upload.Upload()
         upload.connect('upload-error', self.upload_error)
         upload.connect('upload-finished', self.upload_completed)
-        upload.upload(path, title, description,
-                mime_type, TOKEN_KEY)
-
+        upload.upload(path, title, description, TOKEN_KEY)
 
     def upload_completed(self, widget, link):
         metadata = self._get_metadata()
@@ -178,6 +166,7 @@ class _ShareMenu(MenuItem):
 
     def upload_error(self, widget, msg):
         self.emit('transfer-state-changed', _('Google drive'), msg)
+
 
 def get_account():
     return Account()

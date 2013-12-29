@@ -16,9 +16,6 @@
 
 import os
 import logging
-import time
-import urllib
-import urlparse
 import sys
 from sugar3 import env
 
@@ -34,15 +31,14 @@ from cpsection.webaccount.web_service import WebService
 from oauth2client.client import OAuth2WebServerFlow
 
 
-
 class WebService(WebService):
-    CLIENT_ID = "79915831092-oavi9geds5iokcn8c9okeediu92udi94.apps.googleusercontent.com"
+    CLIENT_ID = "79915831092-oavi9geds5iokcn8c9okeediu92udi94.apps." \
+        "googleusercontent.com"
     CLIENT_SECRET = "KfvpSENuGzrafcTFI4iXxj6g"
     REDIRECT_URI = "https://www.sugarlabs.org"
     REDIRECT_TOKEN = "https://www.sugarlabs.org/?code="
     OAUTH_SCOPE = 'https://www.googleapis.com/auth/drive'
     TOKEN_KEY = "/desktop/sugar/collaboration/gdrive_token"
-
 
     def __init__(self):
         self._account = accountsmanager.get_account('sugargdrive')

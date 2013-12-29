@@ -1,6 +1,4 @@
 from __future__ import generators
-from sugar3 import env
-import os
 """
 httplib2
 
@@ -11,6 +9,9 @@ Requires Python 2.3 or later
 
 Changelog:
 2007-08-18, Rick: Modified so it's able to use a socks proxy if needed.
+
+Modified for Sugar Google Drive service
+Ignacio Rodriguez <ignacio@sugarlabs.org>
 
 """
 
@@ -184,8 +185,8 @@ class CertificateHostnameMismatch(SSLHandshakeError):
 # requesting that URI again.
 DEFAULT_MAX_REDIRECTS = 5
 
-# Use system CA certificates
-
+# Use custom CA certificates
+from sugar3 import env
 GOOGLE_API = os.path.join(env.get_profile_path(), 'extensions', 'webservice')
 CA_CERTS = os.path.join(GOOGLE_API, "httplib2", "cacerts.txt")
 
