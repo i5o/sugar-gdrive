@@ -22,8 +22,7 @@ import urlparse
 import sys
 from sugar3 import env
 
-GOOGLE_API = os.path.join(env.get_profile_path(), 'extensions', 'webservice',
-    'gdrive', 'gdrive')
+GOOGLE_API = os.path.join(env.get_profile_path(), 'extensions', 'webservice')
 sys.path.append(GOOGLE_API)
 
 from gi.repository import GConf
@@ -46,11 +45,11 @@ class WebService(WebService):
 
 
     def __init__(self):
-        self._account = accountsmanager.get_account('gdrive')
+        self._account = accountsmanager.get_account('sugargdrive')
         self.authorize_url = None
 
     def get_icon_name(self):
-        return 'computer-xo'
+        return 'sugargdrive'
 
     def config_service_cb(self, widget, event, container):
         wkv = WebKit.WebView()
@@ -81,9 +80,9 @@ class WebService(WebService):
         uri = req.get_uri()
         if uri is None:
             return
-
+        logging.debug(uri)
         if uri.startswith(self.REDIRECT_TOKEN):
-            token = uri[32:]
+            token = str(uri[32:]).strip()
             self._save_gdrive_token(token)
 
     def _save_gdrive_token(self, access_token):

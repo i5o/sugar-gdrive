@@ -12,6 +12,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import os
+import sys
+import logging
+from sugar3 import env
 from gettext import gettext as _
 
 from gi.repository import Gtk
@@ -20,13 +24,18 @@ from gi.repository import GObject
 from sugar3.graphics.alert import NotifyAlert
 from sugar3.graphics.icon import Icon
 from sugar3.graphics.menuitem import MenuItem
+from sugar3.datastore import datastore
 
 from jarabe.journal import journalwindow
 from jarabe.journal import model
 from jarabe.webservice import account, accountsmanager
 
-ACCOUNT_NAME = 'gdrive'
-ACCOUNT_ICON = 'sugar-gdrive'
+GOOGLE_API = os.path.join(env.get_profile_path(), 'extensions', 'webservice')
+sys.path.append(GOOGLE_API)
+
+
+ACCOUNT_NAME = _('Upload to Google Drive')
+ACCOUNT_ICON = 'sugargdrive'
 TOKEN_KEY = "/desktop/sugar/collaboration/gdrive_token"
 
 
@@ -41,7 +50,7 @@ class SharedJournalEntry():
 class Account(account.Account):
 
     def __init__(self):
-        self.upload = accountsmanager.get_service('gdrive')
+        self.upload = accountsmanager.get_service('sugargdrive')
         self._shared_journal_entry = None
 
     def get_description(self):
@@ -85,6 +94,9 @@ class _SharedJournalEntry(SharedJournalEntry):
         journalwindow.get_journal_window().remove_alert(alert)
         self._alert = None
 
+    def _connect_transfer_signals(self, transfer_widget):
+        transfer_widget.connect('transfer-state-changed',
+                                self.__display_alert_cb)
 
 class _ShareMenu(MenuItem):
     __gsignals__ = {
@@ -115,28 +127,30 @@ class _ShareMenu(MenuItem):
 
     def _get_mimetype(self):
         metadata = self._get_metadata()
-        jobject = datastore.get(metadata['uid'])
-        mime_type = jobject.mime_type
+        mime_type = "text/plain"
+        if 'mime_type' in metadata:
+            title = str(metadata['mime_type'])
 
         return mime_type
 
     def _get_description(self):
         metadata = self._get_metadata()
-        jobject = datastore.get(metadata['uid'])
-        description = jobject.description
+        description = ""
+        if 'description' in metadata:
+            description = str(metadata['description'])
 
         return description
 
     def _get_title(self):
         metadata = self._get_metadata()
-        jobject = datastore.get(metadata['uid'])
-        title = jobject.title
+        title = _('Sugar upload')
+        if 'title' in metadata:
+            title = str(metadata['title'])
 
         return title
 
     def __share_menu_cb(self, menu_item):
         path = self._get_data()
-        mime_type = self._get_mime()
         title = self._get_title()
         mime_type = self._get_mimetype()
         description = self._get_description()
@@ -144,19 +158,26 @@ class _ShareMenu(MenuItem):
         self.emit('transfer-state-changed', _('Google drive'),
                 _('Upload started'))
 
+        upload = self._account.upload.Upload()
+        upload.connect('upload-error', self.upload_error)
+        upload.connect('upload-finished', self.upload_completed)
         upload.upload(path, title, description,
                 mime_type, TOKEN_KEY)
 
-    def __completed_cb(self, data, response):
-        url = response[2]
 
+    def upload_completed(self, widget, link):
         metadata = self._get_metadata()
-        tags = '%s %s' % (metadata.get('tags', ''), url)
+        tags = '%s %s' % (metadata.get('tags', ''), link)
 
         ds_object = datastore.get(metadata['uid'])
         ds_object.metadata['tags'] = tags
         datastore.write(ds_object, update_mtime=False)
 
+        self.emit('transfer-state-changed', _('Google drive'),
+                _('Upload finished. Link saved in tags of entry.'))
+
+    def upload_error(self, widget, msg):
+        self.emit('transfer-state-changed', _('Google drive'), msg)
 
 def get_account():
     return Account()

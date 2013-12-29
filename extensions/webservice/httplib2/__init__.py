@@ -1,4 +1,6 @@
 from __future__ import generators
+from sugar3 import env
+import os
 """
 httplib2
 
@@ -183,7 +185,10 @@ class CertificateHostnameMismatch(SSLHandshakeError):
 DEFAULT_MAX_REDIRECTS = 5
 
 # Use system CA certificates
-CA_CERTS = "/etc/ssl/certs/ca-certificates.crt"
+
+GOOGLE_API = os.path.join(env.get_profile_path(), 'extensions', 'webservice')
+CA_CERTS = os.path.join(GOOGLE_API, "httplib2", "cacerts.txt")
+
 
 # Which headers are hop-by-hop headers by default
 HOP_BY_HOP = ['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade']
