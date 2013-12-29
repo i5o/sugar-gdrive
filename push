@@ -1,0 +1,9 @@
+#!/usr/bin/env python
+import os
+
+if os.path.exists("sugargdrive.tar.gz"):
+    os.remove("sugargdrive.tar.gz")
+os.system("tar -czvf sugargdrive.tar.gz extensions/")
+os.system("git add sugargdrive.tar.gz")
+os.system("git commit -m 'Update package'")
+os.system("git push")
