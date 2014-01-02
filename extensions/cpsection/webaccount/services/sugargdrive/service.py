@@ -1,4 +1,5 @@
-# Copyright (C) 2013, Ignacio Rodriguez
+# Copyright (C) 2014, Ignacio Rodriguez <ignacio@sugarlabs.org>
+# Thx to Martin Abente Lahaye <martin.abente.lahaye@gmail.com>
 # Based on Facebook code
 #
 # This program is free software: you can redistribute it and/or modify
@@ -14,6 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import json
 import os
 import logging
 import sys
@@ -22,7 +24,6 @@ from sugar3 import env
 GOOGLE_API = os.path.join(env.get_profile_path(), 'extensions', 'webservice')
 sys.path.append(GOOGLE_API)
 
-from gi.repository import GConf
 from gi.repository import Gtk
 from gi.repository import WebKit
 
@@ -38,7 +39,7 @@ class WebService(WebService):
     REDIRECT_URI = "https://www.sugarlabs.org"
     REDIRECT_TOKEN = "https://www.sugarlabs.org/?code="
     OAUTH_SCOPE = 'https://www.googleapis.com/auth/drive'
-    TOKEN_KEY = "/desktop/sugar/collaboration/gdrive_token"
+    TOKEN_FILE = os.path.join(env.get_profile_path(), 'gdrive_settings')
 
     def __init__(self):
         self._account = accountsmanager.get_account('sugargdrive')
@@ -66,26 +67,29 @@ class WebService(WebService):
         container.show_all()
 
     def _get_auth_url(self):
-        flow = OAuth2WebServerFlow(self.CLIENT_ID, self.CLIENT_SECRET,
+        self._flow = OAuth2WebServerFlow(self.CLIENT_ID, self.CLIENT_SECRET,
                 self.OAUTH_SCOPE, self.REDIRECT_URI)
 
-        self.authorize_url = flow.step1_get_authorize_url()
+        self.authorize_url = self._flow.step1_get_authorize_url()
         return self.authorize_url
 
     def _nav_policy_cb(self, view, frame, req, action, param):
         uri = req.get_uri()
         if uri is None:
             return
-        logging.debug(uri)
+
         if uri.startswith(self.REDIRECT_TOKEN):
             token = str(uri[32:]).strip()
-            self._save_gdrive_token(token)
 
-    def _save_gdrive_token(self, access_token):
-        client = GConf.Client.get_default()
-        client.set_string(self.TOKEN_KEY,
-                          access_token)
+            # I have the power.
+            credentials = self._flow.step2_exchange(token)
+            if os.path.exists(self.TOKEN_FILE):
+                os.remove(self.TOKEN_FILE)
 
+            data = credentials.to_json()
+            f = open(self.TOKEN_FILE, 'w')
+            f.write(data)
+            f.close()
 
 def get_service():
     return WebService()

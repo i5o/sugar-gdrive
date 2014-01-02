@@ -15,6 +15,7 @@
 import os
 import sys
 import json
+import tempfile
 
 from gettext import gettext as _
 
@@ -54,26 +55,45 @@ theme.append_search_path(ICONS_PATH)
 ACCOUNT_DESCRIPTION = _('Upload to Google Drive')
 ACCOUNT_NAME = _('Sugar Google Drive')
 ACCOUNT_ICON = 'sugargdrive'
-TOKEN_KEY = "/desktop/sugar/collaboration/gdrive_token"
-USER_FILES = os.path.join(env.get_profile_path(), 'gdrive_files.json')
+USER_FILES = os.path.join(env.get_profile_path(), 'gdrive_files')
 
 
 class FilesModel(Gtk.ListStore):
-    def __init__(self, account, listview, button):
+    def __init__(self, account, display_alert, load_files,
+            journal_button, listview):
         Gtk.ListStore.__init__(self, str, bool, str, object, str, str, str,
-            int, object, object, object, bool, str, str)
+            int, object, object, object, bool, str, str, str, str)
 
         self._account = account
+        self._display_alert = display_alert
+        self._load_files = load_files
+        self._journal_button = journal_button
         self._listview = listview
-        self._button = button
 
     def do_drag_data_get(self, path, selection):
         data = self.get_iter(path)
-        title = self.get_value(data, 4)
-        link = self.get_value(data, 12)
         mime_type = self.get_value(data, 13)
-        self._account.DownloadFiles(link, title, mime_type,
-            self._listview, self._button)
+        fileid = self.get_value(data, 14)
+        title = self.get_value(data, 15)
+        data = self._account.download_file(fileid, self._display_alert)
+
+        fd, file_path = tempfile.mkstemp(dir="/tmp/")
+        os.close(fd)
+
+        f = open(file_path, 'w')
+        f.write(data)
+        f.close()
+
+        jobject = datastore.create()
+        jobject.metadata['title'] = title
+        jobject.metadata['icon-color'] = profile.get_color().to_string()
+        jobject.metadata['mime_type'] = mime_type
+        if data:
+            jobject.file_path = file_path
+        datastore.write(jobject)
+        self._load_files()
+        self._journal_button.set_active(True)
+        self._listview.refresh()
 
 
 class ExtensionPalette(Palette):
@@ -151,24 +171,26 @@ class Account(account.Account):
     def _journal_toggled(self, widget):
         self._journal.get_window().set_cursor(None)
         option = widget.props.active
+        self._cid = self._listview.tree_view.connect('drag-begin',
+            self.turn_off_buttons)
+        self._ccid = self._listview.tree_view.connect('drag-end',
+            self.turn_on_buttons)
+
         if option:
-            self._cid = self._listview.tree_view.connect('drag-begin',
-                self.turn_off_buttons)
-            self._ccid = self._listview.tree_view.connect('drag-end',
-                self.turn_on_buttons)
             option = False
         else:
-            if self._cid and self._ccid:
-                self._listview.tree_view.disconnect(self._cid)
-                self._listview.tree_view.disconnect(self._ccid)
-                self._cid = None
-                self._ccid = None
+            self._listview.tree_view.disconnect(self._cid)
+            self._listview.tree_view.disconnect(self._ccid)
+            self._cid = None
+            self._ccid = None
             option = True
         self._listview.use_options(option)
 
     def _load_files(self, *kwargs):
         if not self._model:
-            self._model = FilesModel(self.upload, self._listview, self)
+            journal_button = self._volumes_toolbar._volume_buttons[0]
+            self._model = FilesModel(self.upload, self._display_alert_cb,
+                self._load_files, journal_button, self._listview)
         self._model.clear()
         self._listview.tree_view.set_model(self._model)
 
@@ -183,7 +205,7 @@ class Account(account.Account):
                     os.remove(USER_FILES)
                     self._journal.get_window().set_cursor(None)
                     f.close()
-                    return
+                    data = []
 
                 isdict = False
                 if isinstance(data, dict):
@@ -197,16 +219,22 @@ class Account(account.Account):
                         GLib.markup_escape_text(userfile['title']))
                     icon_name = _get_icon_for_mime(userfile['mimeType'])
                     link = userfile['alternateLink']
-                    itter = self._model.insert(-1, ['', False, icon_name,
+
+                    itter = self._model.insert(-1, [
+                        '', False, icon_name,
                         profile.get_color(), txt, '', '', 50,
                         profile.get_color(), profile.get_color(),
-                        profile.get_color(), True, link, userfile['mimeType']])
+                        profile.get_color(), True, link,
+                        userfile['mimeType'],
+                        userfile['id'],
+                        userfile['title']])
+
                     files.append(itter)
 
             if len(files) == 0 or not os.path.exists(USER_FILES):
                 self._listview._show_message(_('No files in your '
-                    'account, please update information clickeando '
-                    'en el menu del icono'),
+                    'account, please update your file list '
+                    'clicking in the toolbar menu option.'),
                     icon_name=ACCOUNT_ICON)
             else:
                 self._listview._clear_message()
@@ -246,8 +274,7 @@ class Account(account.Account):
 
         def internal_callback():
             inst = self.upload.Upload()
-            inst.update_files(self._display_alert_cb, TOKEN_KEY,
-                self._load_files)
+            inst.update_files(self._display_alert_cb, self._load_files)
             self._listview._clear_message()
             self._journal.get_window().set_cursor(None)
 
@@ -257,19 +284,16 @@ class Account(account.Account):
         buttons = self._volumes_toolbar._volume_buttons
         current = 0
         for button in buttons:
-            if not current:
-                continue
-            button.set_sensitive(False)
+            if current == 0:
+                button.set_sensitive(True)
+            else:
+                button.set_sensitive(False)
             current += 1
 
     def turn_on_buttons(self, *kwargs):
         buttons = self._volumes_toolbar._volume_buttons
-        current = 0
         for button in buttons:
-            if not current:
-                continue
             button.set_sensitive(True)
-            current += 1
 
 
 class _SharedJournalEntry(SharedJournalEntry):
@@ -348,7 +372,7 @@ class _ShareMenu(MenuItem):
         upload = self._account.upload.Upload()
         upload.connect('upload-error', self.upload_error)
         upload.connect('upload-finished', self.upload_completed)
-        upload.upload(path, title, description, TOKEN_KEY)
+        upload.upload(path, title, description)
 
     def upload_completed(self, widget, link):
         metadata = self._get_metadata()
