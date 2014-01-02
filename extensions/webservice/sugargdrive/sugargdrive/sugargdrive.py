@@ -17,11 +17,7 @@
 import logging
 import os
 import sys
-
-try:
-    import simplejson as json
-except ImportError:
-    import json
+import json
 
 import subprocess
 from gettext import gettext as _
@@ -64,6 +60,28 @@ OAUTH_SCOPE = 'https://www.googleapis.com/auth/drive'
 REDIRECT_URI = "https://www.sugarlabs.org"
 ACCOUNT_NAME = _('Sugar Google Drive')
 
+DS_DBUS_SERVICE = 'org.laptop.sugar.DataStore'
+DS_DBUS_INTERFACE = 'org.laptop.sugar.DataStore'
+DS_DBUS_PATH = '/org/laptop/sugar/DataStore'
+
+_active_downloads = []
+_dest_to_window = {}
+
+PROGRESS_TIMEOUT = 3000
+SPACE_THRESHOLD = 52428800  # 50 Mb
+
+
+def format_float(f):
+    return "%0.2f" % f
+
+
+def remove_all_downloads():
+    for download in _active_downloads:
+        download.cancel()
+        if download.dl_jobject is not None:
+            datastore.delete(download.dl_jobject.object_id)
+        download.cleanup()
+
 
 # Copied from grestful code
 def asynchronous(method):
@@ -71,6 +89,45 @@ def asynchronous(method):
     def _async(*args, **kwargs):
         GObject.idle_add(method, *args, **kwargs)
     return _async
+
+
+class DownloadFiles(WebKit.WebView):
+    def __init__(self, uri, title, mime, listview, button):
+        WebKit.WebView.__init__(self)
+        self._link = uri
+        self._title = title
+        self._mime = mime
+        self._listview = listview
+        self._button = button
+
+        self.scroll = Gtk.ScrolledWindow()
+        self.scroll.set_policy(Gtk.PolicyType.AUTOMATIC,
+            Gtk.PolicyType.AUTOMATIC)
+        self.scroll.add(self)
+
+        self._listview._show_widget(self.scroll)
+        self.connect('download-requested', self.__download_requested_cb)
+        self.connect('mime-type-policy-decision-requested',
+                     self.__mime_type_policy_cb)
+        self.load_uri(uri)
+
+    def __download_requested_cb(self, browser, download):
+        Download(download, self._mime)
+
+        def internal_callback():
+            journal_button = self._button._volumes_toolbar._volume_buttons[0]
+            journal_button.set_active(True)
+
+        GObject.idle_add(internal_callback)
+        return True
+
+    def __mime_type_policy_cb(self, webview, frame, request, mimetype,
+                              policy_decision):
+        if 'html'in mimetype:
+            return True
+        else:
+            policy_decision.download()
+            return True
 
 
 class Upload(GObject.GObject):
@@ -199,7 +256,7 @@ class Upload(GObject.GObject):
                 page_token = files.get('nextPageToken')
                 if not page_token:
                     break
-            except errors.HttpError, error:
+            except Exception, error:
                 display_alert(ACCOUNT_NAME,
                     'An error occurred: %s' % error)
                 break
@@ -207,45 +264,21 @@ class Upload(GObject.GObject):
         f = open(USER_FILES, 'w')
         f.write(json.dumps(files))
         f.close()
-        load_files(None)
-
-DS_DBUS_SERVICE = 'org.laptop.sugar.DataStore'
-DS_DBUS_INTERFACE = 'org.laptop.sugar.DataStore'
-DS_DBUS_PATH = '/org/laptop/sugar/DataStore'
-
-_active_downloads = []
-_dest_to_window = {}
-
-PROGRESS_TIMEOUT = 3000
-SPACE_THRESHOLD = 52428800  # 50 Mb
-
-def format_float(f):
-    return "%0.2f" % f
-
-def remove_all_downloads():
-    for download in _active_downloads:
-        download.cancel()
-        if download.dl_jobject is not None:
-            datastore.delete(download.dl_jobject.object_id)
-        download.cleanup()
+        load_files()
 
 
 class Download(object):
-    def __init__(self, url, filename, mimetype):
-        nr = WebKit.NetworkRequest()
-        nr.set_uri(url)
-        self._download = WebKit.Download(network_request=nr)
-        logging.debug(url)
-
-        self._filename = filename
-        self._mimetype = mimetype
+    def __init__(self, download, mime):
+        self._download = download
         self._journal = journalwindow.get_journal_window()
-        self._source = url
+        self._source = download.get_uri()
 
         self._download.connect('notify::status', self.__state_change_cb)
         self._download.connect('error', self.__error_cb)
 
         self.datastore_deleted_handler = None
+        self._filename = self._download.get_suggested_filename()
+        self._mimetype = mime
 
         self.dl_jobject = None
         self._object_id = None
@@ -261,8 +294,8 @@ class Download(object):
             os.makedirs(self.temp_path)
 
         fd, self._dest_path = tempfile.mkstemp(dir=self.temp_path,
-                                suffix=self._download.get_suggested_filename(),
-                                prefix='tmp')
+                                    suffix=download.get_suggested_filename(),
+                                    prefix='tmp')
         os.close(fd)
 
         # We have to start the download to get 'total-size'
@@ -315,11 +348,11 @@ class Download(object):
                 free_space_mb = (self._free_available_space(
                     path=self.temp_path) - SPACE_THRESHOLD) \
                     / 1024.0 ** 2
-                filename = self._filename
-                self._canceled_alert.props.msg = \
-                    _('Download "%{filename}" requires %{total_size_in_mb}' \
-                      ' MB of free space, only %{free_space_in_mb} MB'      \
-                      ' is available' % \
+                filename = self._download.get_suggested_filename()
+                self._canceled_alert.props.msg = _(
+                    'Download "%{filename}" requires %{total_size_in_mb}'
+                      ' MB of free space, only %{free_space_in_mb} MB'
+                      ' is available' %
                       {'filename': filename,
                        'total_size_in_mb': format_float(total_size_mb),
                        'free_space_in_mb': format_float(free_space_mb)})
@@ -375,8 +408,8 @@ class Download(object):
             sniffed_mime_type = mime.get_for_file(self._dest_path)
             self.dl_jobject.metadata['mime_type'] = sniffed_mime_type
 
-            if sniffed_mime_type in ('image/bmp','image/gif','image/jpeg',
-                                     'image/png','image/tiff'):
+            if sniffed_mime_type in ('image/bmp', 'image/gif', 'image/jpeg',
+                                     'image/png', 'image/tiff'):
                 preview = self._get_preview()
                 if preview is not None:
                     self.dl_jobject.metadata['preview'] = \
@@ -535,7 +568,7 @@ class Download(object):
         return preview_str.getvalue()
 
     def __datastore_deleted_cb(self, uid):
-        logging.debug('Downloaded entry has been deleted' \
+        logging.debug('Downloaded entry has been deleted'
                           ' from the datastore: %r', uid)
         global _active_downloads
         if self in _active_downloads:
