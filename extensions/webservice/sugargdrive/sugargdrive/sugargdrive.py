@@ -76,19 +76,32 @@ def download_file(fileid, display_alert):
     except:
         display_alert(None, ACCOUNT_NAME, _('Token expired, please update your'
             ' token in Control Panel.'))
-    download_url = drive_file.get('downloadUrl')
+    try:
+        download_url = drive_file.get('downloadUrl')
+    except:
+        download_url = None
+
+    try:
+        props = drive_service.properties().get(
+                fileId=fileid, propertyKey='activity', 
+                    visibility='PUBLIC').execute()
+        activity = props['value']
+    except:
+        activity = None
 
     if download_url:
         display_alert(None, ACCOUNT_NAME, _('Download started'))
         resp, content = drive_service._http.request(download_url)
+
         if resp.status == 200:
             display_alert(None, ACCOUNT_NAME, _('Download finished'))
-            return content
+            return [content, activity]
         else:
             display_alert(None, ACCOUNT_NAME, _('An error occurred: %s' % resp))
             return None
+
     else:
-        return None
+        return [None, None]
 
 
 class Upload(GObject.GObject):
@@ -104,7 +117,7 @@ class Upload(GObject.GObject):
         GObject.GObject.__init__(self)
 
     @asynchronous
-    def upload(self, path, title, description):
+    def upload(self, path, title, description, activity):
         if not os.path.exists(TOKEN_FILE):
             self.emit('upload-error',
                     _('Token expired, please update your'
@@ -155,6 +168,19 @@ class Upload(GObject.GObject):
                 _('Token expired, please update your'
                 ' token in Control Panel.'))
             return False
+
+        body = {
+            'key': 'activity',
+            'value': activity,
+            'visibility': 'PUBLIC'
+        }
+
+        file_id = file_upload['id']
+        try:
+            drive_service.properties().insert(
+                fileId=file_id, body=body).execute()
+        except:
+            pass
 
         self.emit('upload-finished', file_upload['alternateLink'])
 

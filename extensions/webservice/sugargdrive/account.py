@@ -80,15 +80,19 @@ class FilesModel(Gtk.ListStore):
         fd, file_path = tempfile.mkstemp(dir="/tmp/")
         os.close(fd)
 
-        f = open(file_path, 'w')
-        f.write(data)
-        f.close()
+        if data[0]:
+            f = open(file_path, 'w')
+            f.write(data[0])
+            f.close()
 
         jobject = datastore.create()
         jobject.metadata['title'] = title
         jobject.metadata['icon-color'] = profile.get_color().to_string()
         jobject.metadata['mime_type'] = mime_type
-        if data:
+        if data[1]:
+            jobject.metadata['activity'] = data[1]
+
+        if data[0]:
             jobject.file_path = file_path
         datastore.write(jobject)
         self._load_files()
@@ -119,6 +123,7 @@ class ExtensionPalette(Palette):
         self.menu_item.connect('activate', callback)
 
 
+
 class SharedJournalEntry():
     def get_share_menu(self, get_uid_list):
         raise NotImplementedError
@@ -137,8 +142,6 @@ class Account(account.Account):
         self._alert = None
         self._listview = None
         self._volume_button = None
-        self._cid = None
-        self._ccid = None
 
     def get_description(self):
         return ACCOUNT_DESCRIPTION
@@ -171,20 +174,11 @@ class Account(account.Account):
     def _journal_toggled(self, widget):
         self._journal.get_window().set_cursor(None)
         option = widget.props.active
-        self._cid = self._listview.tree_view.connect('drag-begin',
-            self.turn_off_buttons)
-        self._ccid = self._listview.tree_view.connect('drag-end',
-            self.turn_on_buttons)
-
         if option:
-            option = False
+            new_option = False
         else:
-            self._listview.tree_view.disconnect(self._cid)
-            self._listview.tree_view.disconnect(self._ccid)
-            self._cid = None
-            self._ccid = None
-            option = True
-        self._listview.use_options(option)
+            new_option = True
+        self._listview.use_options(new_option)
 
     def _load_files(self, *kwargs):
         if not self._model:
@@ -271,6 +265,9 @@ class Account(account.Account):
                 icon_name=ACCOUNT_ICON)
         cursor = Gdk.Cursor.new(Gdk.CursorType.WATCH)
         self._journal.get_window().set_cursor(cursor)
+        if not self._volume_button.props.active:
+            self._volume_button.set_active(True)
+            self._journal_toggled(self._volume_button)
 
         def internal_callback():
             inst = self.upload.Upload()
@@ -279,21 +276,6 @@ class Account(account.Account):
             self._journal.get_window().set_cursor(None)
 
         GObject.idle_add(internal_callback)
-
-    def turn_off_buttons(self, *kwargs):
-        buttons = self._volumes_toolbar._volume_buttons
-        current = 0
-        for button in buttons:
-            if current == 0:
-                button.set_sensitive(True)
-            else:
-                button.set_sensitive(False)
-            current += 1
-
-    def turn_on_buttons(self, *kwargs):
-        buttons = self._volumes_toolbar._volume_buttons
-        for button in buttons:
-            button.set_sensitive(True)
 
 
 class _SharedJournalEntry(SharedJournalEntry):
@@ -361,10 +343,19 @@ class _ShareMenu(MenuItem):
 
         return title
 
+    def _get_activity(self, metadata=None):
+        if not metadata:
+            metadata = self._get_metadata()
+        activity = ''
+        if 'activity' in metadata:
+            activity = str(metadata['activity'])
+        return activity
+
     def upload_file(self, menu_item, metadata=None):
         path = self._get_data(metadata)
         title = self._get_title(metadata)
         description = self._get_description(metadata)
+        activity = self._get_activity(metadata)
 
         self.emit('transfer-state-changed', _('Google drive'),
                 _('Upload started'))
@@ -372,7 +363,7 @@ class _ShareMenu(MenuItem):
         upload = self._account.upload.Upload()
         upload.connect('upload-error', self.upload_error)
         upload.connect('upload-finished', self.upload_completed)
-        upload.upload(path, title, description)
+        upload.upload(path, title, description, activity)
 
     def upload_completed(self, widget, link):
         metadata = self._get_metadata()
