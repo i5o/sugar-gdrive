@@ -148,6 +148,7 @@ class Upload(GObject.GObject):
             self.emit('upload-error',
                 _('Token expired, please update your'
                 ' token in Control Panel.'))
+            return False
 
         if 'Revoked: true' in file_upload or 'invalid' in file_upload:
             self.emit('upload-error',
@@ -176,6 +177,7 @@ class Upload(GObject.GObject):
             display_alert(None, ACCOUNT_NAME,
                     _('No internet connection. '
                         'You need internet for upload files.'))
+            return False
 
         drive_service = build('drive', 'v2', http=http)
 
